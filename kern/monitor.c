@@ -55,14 +55,28 @@ mon_kerninfo(int argc, char **argv, struct Trapframe *tf)
 	return 0;
 }
 
+    //lab1 - start
 int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 {
-	// Your code here.
+
+    uint32_t* ebp = (uint32_t*)read_ebp();
+    cprintf("Stack backtrace:\n");
+    while(ebp != 0){
+        cprintf("  ebp %08x  eip %08x  args ", ebp,*(ebp+1) /*eip*/);
+        cprintf("%08x %08x %08x %08x %08x\n",*(ebp+2),*(ebp+3),*(ebp+4),*(ebp+5),*(ebp+6));
+        
+        struct Eipdebuginfo info; //declared in kdebug.c
+        int res = debuginfo_eip(*(ebp+1),&info);
+        if (res == 0){
+        cprintf("\t   %s:%d: %.*s+%d\n",info.eip_file,info.eip_line,info.eip_fn_namelen,info.eip_fn_name,*(ebp+1)- info.eip_fn_addr);
+        }
+        ebp = (uint32_t*) (*ebp);     
+    }
+
 	return 0;
 }
-
-
+    //lab1 - finish
 
 /***** Kernel monitor command interpreter *****/
 
