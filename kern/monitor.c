@@ -27,9 +27,13 @@ struct Command {
 static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
+	{"backtrace", "backtrace", mon_backtrace},
     { "showmappings", "Display the information about memory mappings",mon_showmappings},
     { "dumpcontent", "Display the content of given range",mon_dumpcontent},
     { "changeperms", "change permissions ",mon_changeperms},
+    { "pgstat", "Display specific info for page at virtual address", mon_pgstatus},
+	{ "continue", "Continue execution from current break point", mon_continue},
+	{ "step", "Single step one instruction", mon_step},
 };
 #define NCOMMANDS (sizeof(commands)/sizeof(commands[0]))
 
@@ -293,4 +297,81 @@ int mon_changeperms(int argc, char **argv, struct Trapframe *tf){
 
     }
     return 0;   
+}
+
+int mon_continue(int argc, char **argv, struct Trapframe *tf) {
+	if(!tf) {
+		cprintf("Unknown trap frame\n");
+		return 0;
+	}
+
+	tf->tf_eflags &= ~FL_TF;
+	tf->tf_eflags |= FL_RF;
+
+	return -1;
+}	
+
+int mon_step(int argc, char **argv, struct Trapframe *tf) {
+	if(!tf) {
+		cprintf("Unknown trap frame\n");
+		return 0;
+	}
+
+	tf->tf_eflags |= FL_TF;
+	print_trapframe(tf);
+
+	return -1;
+}
+
+int 
+mon_pgstatus(int argc, char **argv, struct Trapframe *tf)
+{
+	if(argc < 2) { cprintf("Usage: pgstat 0x(address) [--contents|-c]\n"); return 0; }
+
+	uintptr_t address = strtol(argv[1], NULL, 16);
+	if(address < 0) { cprintf("Invalid address 0x%08x\n", address); return 0; }
+	char * paddress = (char *) ROUNDDOWN(address, PGSIZE);
+
+	pte_t * pte = pgdir_walk(kern_pgdir, (const void *) address, 0);
+	if(pte == NULL || (*pte & PTE_P) == 0) {
+		cprintf("Page at 0x%08x (0x%08x) is not mapped or not present\n", paddress, address);
+		return 0;
+	}
+
+	uint32_t pgsize = (*pte & PTE_PS) == 0 ? PGSIZE : PTSIZE;
+	char * page_end = (char *) ((uint32_t) paddress + pgsize - 1);
+	cprintf("\nPage at 0x%08x [0x%08x, 0x%08x):\n", address, paddress, page_end);
+	cprintf("------------------------------------------------\n\n");
+
+	uint32_t kb = 1024, ks = 0;
+	while(pgsize >= kb) { ks++; pgsize /= kb; }
+
+	char * units;
+	switch(ks) {
+		case 0:  units = "B";  break;
+		case 1:  units = "KB"; break;
+		case 2:  units = "MB"; break;
+		case 3:  units = "GB"; break;
+		case 4:  units = "TB"; break;
+		default: units = "";
+	}
+
+	cprintf("page size is: %d%s\n\n", pgsize, units);
+
+	cprintf("user accessible: %s\n", (*pte & PTE_U) == 0 ? "NO" : "YES");
+	cprintf("writeable:       %s\n", (*pte & PTE_W) == 0 ? "NO" : "YES");
+	cprintf("page is present: %s\n", (*pte & PTE_P) == 0 ? "NO" : "YES");
+
+	if(argc >= 2 && (strcmp(argv[2], "-c") == 0 || strcmp(argv[2], "--contents") == 0)) {
+		// print page contents
+		cprintf("\nPage contents:\n");
+		
+		for(; paddress <= page_end; ++ paddress) {
+			if((uint32_t) paddress % 16 == 0) cprintf("\n0x%08x: ", paddress);
+			cprintf("0x%02x ", *paddress & 0xff);
+		}
+	}
+
+	cprintf("\n\n");
+	return 0;
 }
