@@ -14,7 +14,10 @@
 #include <kern/cpu.h>
 #include <kern/spinlock.h>
 
+#define trap_number 49
 static struct Taskstate ts;
+
+extern uint32_t trap_handlers[];
 
 /* For debugging, so print_trapframe can distinguish between printing
  * a saved trapframe and printing the current trapframe and print some
@@ -66,13 +69,19 @@ static const char *trapname(int trapno)
 }
 
 
-void
-trap_init(void)
+void trap_init(void)
 {
 	extern struct Segdesc gdt[];
-
-	// LAB 3: Your code here.
-
+    uint32_t i = 0;
+	for(i = 0; i < trap_number; i++){
+        if((i != T_BRKPT) && (i != T_SYSCALL))  
+            SETGATE(idt[i], 0, GD_KT, trap_handlers[i], 0/*dpl*/);
+        
+    }
+    //breakpoints and syscall can be invoked by the user
+        SETGATE(idt[T_BRKPT], 0, GD_KT, trap_handlers[T_BRKPT], 3/*dpl*/);
+        SETGATE(idt[T_SYSCALL], 0, GD_KT, trap_handlers[T_SYSCALL], 3/*dpl*/);
+        
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -172,7 +181,6 @@ static void
 trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
-	// LAB 3: Your code here.
 
 	// Handle spurious interrupts
 	// The hardware sometimes raises these because of noise on the
@@ -186,6 +194,32 @@ trap_dispatch(struct Trapframe *tf)
 	// Handle clock interrupts. Don't forget to acknowledge the
 	// interrupt using lapic_eoi() before calling the scheduler!
 	// LAB 4: Your code here.
+
+    //handle page fault
+	if(tf->tf_trapno == T_PGFLT) {
+		page_fault_handler(tf);
+		return;
+	}
+    
+    //handle breakpoints
+    if(tf->tf_trapno == T_BRKPT) {
+		monitor(tf);
+		return;
+	}
+    
+
+    //handle syscall
+    if(tf->tf_trapno == T_SYSCALL) {
+        struct PushRegs regs = tf->tf_regs;
+		tf->tf_regs.reg_eax = syscall(regs.reg_eax,
+                                      regs.reg_edx,
+                                      regs.reg_ecx,
+                                      regs.reg_ebx,
+                                      regs.reg_edi,
+                                      regs.reg_esi);
+		return;
+	}
+
 
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
@@ -267,8 +301,8 @@ page_fault_handler(struct Trapframe *tf)
 
 	// Handle kernel-mode page faults.
 
-	// LAB 3: Your code here.
-
+    if(((tf->tf_cs) & (0x3)) == 0) panic("trap.c -> page_fault_handler : kernel page fault\n");
+    
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
 
