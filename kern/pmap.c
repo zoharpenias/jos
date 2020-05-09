@@ -286,6 +286,12 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
+    uint32_t i = 0;
+    uintptr_t curr_stack;
+    for(i = 0; i < NCPU; i++){
+        curr_stack = KSTACKTOP - i * (KSTKSIZE + KSTKGAP);
+        boot_map_region(kern_pgdir, curr_stack - KSTKSIZE, KSTKSIZE, PADDR(percpu_kstacks[i]), PTE_W);
+    }
 
 }
 
@@ -334,7 +340,7 @@ page_init(void)
         pages[i].pp_ref = 0;
         
         //handles the cases of page 0 and the IO hole
-        if((i == 0) || ((i * PGSIZE >= IOPHYSMEM) && (i * PGSIZE < EXTPHYSMEM))){
+        if((i == 0) || ((i * PGSIZE >= IOPHYSMEM) && (i * PGSIZE < EXTPHYSMEM)) || (i * PGSIZE ==  MPENTRY_PADDR )){
             pages[i].pp_link = NULL;
             continue;       
         }
@@ -610,8 +616,15 @@ mmio_map_region(physaddr_t pa, size_t size)
 	//
 	// Hint: The staff solution uses boot_map_region.
 	//
-	// Your code here:
-	panic("mmio_map_region not implemented");
+    
+    uint32_t new_size = ROUNDUP(pa+size,PGSIZE) - ROUNDDOWN(pa,PGSIZE);
+    if(new_size > MMIOLIM - MMIOBASE) panic("pmap.c -> mmio_map_region : MMIO overflow\n");
+    
+    boot_map_region(kern_pgdir, base, new_size, ROUNDDOWN(pa,PGSIZE), PTE_PCD | PTE_PWT | PTE_W);
+    base += new_size;
+    
+    return (void*)(base - new_size);
+
 }
 
 static uintptr_t user_mem_check_addr;

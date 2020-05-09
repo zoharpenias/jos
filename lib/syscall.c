@@ -94,6 +94,12 @@ sys_env_set_status(envid_t envid, int status)
 }
 
 int
+sys_env_set_upcall(envid_t envid, uint32_t trapno, void *upcall)
+{
+	return syscall(SYS_env_set_upcall, 1, envid, trapno, (uint32_t) upcall, 0, 0);
+}
+
+int
 sys_env_set_pgfault_upcall(envid_t envid, void *upcall)
 {
 	return syscall(SYS_env_set_pgfault_upcall, 1, envid, (uint32_t) upcall, 0, 0, 0);
