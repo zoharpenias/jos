@@ -5,6 +5,7 @@
 void
 handler(struct UTrapframe *utf)
 {
+	cprintf("here\n");
 	void *addr = (void*)utf->utf_fault_va;
 	uint32_t err = utf->utf_err;
 	cprintf("i faulted at va %x, err %x\n", addr, err & 7);

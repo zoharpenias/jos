@@ -98,6 +98,11 @@ sys_env_set_trapframe(envid_t envid, struct Trapframe *tf)
 {
 	return syscall(SYS_env_set_trapframe, 1, envid, (uint32_t) tf, 0, 0, 0);
 }
+int
+sys_env_set_upcall(envid_t envid, uint32_t trapno, void *upcall)
+{
+	return syscall(SYS_env_set_upcall, 1, envid, trapno, (uint32_t) upcall, 0, 0);
+}
 
 int
 sys_env_set_pgfault_upcall(envid_t envid, void *upcall)
@@ -122,3 +127,10 @@ sys_time_msec(void)
 {
 	return (unsigned int) syscall(SYS_time_msec, 0, 0, 0, 0, 0, 0);
 }
+
+envid_t
+sys_exec(void * binary,const char** argv) {
+	return syscall(SYS_exec, (uint32_t) binary, 0,0, 0, 0, 0);
+}
+
+

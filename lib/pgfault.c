@@ -6,7 +6,6 @@
 
 #include <inc/lib.h>
 
-
 // Assembly language pgfault entrypoint defined in lib/pfentry.S.
 extern void _pgfault_upcall(void);
 
@@ -24,12 +23,19 @@ void (*_pgfault_handler)(struct UTrapframe *utf);
 void
 set_pgfault_handler(void (*handler)(struct UTrapframe *utf))
 {
-	int r;
+	int res;
 
 	if (_pgfault_handler == 0) {
 		// First time through!
 		// LAB 4: Your code here.
-		panic("set_pgfault_handler not implemented");
+        
+		res = sys_page_alloc(thisenv->env_id, (void *)(UXSTACKTOP - PGSIZE), PTE_W|PTE_U|PTE_P);
+		if (res < 0)
+			panic("pgfault.c->set_pgfault_handler =  alloc UXSTACK failed %e.", res);
+        
+		res = sys_env_set_pgfault_upcall(thisenv->env_id, (void *)_pgfault_upcall);
+		if (res < 0)
+			panic("pgfault.c->set_pgfault_handler = insert UXSTACK  %e", res);
 	}
 
 	// Save handler pointer for assembly to call.
