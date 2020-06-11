@@ -300,7 +300,74 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
 static int
 copy_shared_pages(envid_t child)
 {
-	// LAB 5: Your code here.
+    uintptr_t addr;
+    
+    for(addr = 0; addr < USTACKTOP; addr += PGSIZE){
+        if((uvpd[PDX(addr)] & PTE_P) && (uvpt[PGNUM(addr)] & PTE_P) && 
+            (uvpt[PGNUM(addr)] & PTE_U)&& (uvpt[PGNUM(addr)] & PTE_SHARE))
+            
+            sys_page_map(0, (void *) addr, child, (void *) addr, (uvpt[PGNUM(addr)] & PTE_SYSCALL));
+    }
+    
+    
 	return 0;
+}
+
+//challenge 4
+#define CODETEMP		0xe0000000
+envid_t
+exec(const char *prog, const char **argv)
+{
+	unsigned char elf_buf[512];
+	envid_t child;
+
+	int fd, n, r;
+	struct Elf *elf;
+	struct Proghdr *ph;
+	int perm;
+	
+	struct Stat statbuf;
+	intptr_t temp = CODETEMP;
+
+	if ((r = open(prog, O_RDONLY)) < 0)
+		return r;
+	fd = r;
+
+	if((r = fstat(fd, &statbuf)) < 0) {
+		cprintf("cannot read stat of file %s\n", prog);
+		return - E_INVAL;	
+	}
+
+	uint32_t i;
+	for(i = temp; i < ROUNDUP(temp + statbuf.st_size, PGSIZE); i += PGSIZE) {
+		if((r = sys_page_alloc(0, (void *) i, PTE_P | PTE_W | PTE_U)) < 0) 
+			goto error;
+		n = readn(fd, (void *)i, PGSIZE);
+	}
+
+	// Read elf header
+	elf = (struct Elf*) temp;
+	if (elf->e_magic != ELF_MAGIC) {
+		close(fd);
+		cprintf("elf magic %08x want %08x\n", elf->e_magic, ELF_MAGIC);
+		return -E_NOT_EXEC;
+	}
+
+	// Create new child environment
+	if ((r = sys_exec((void *) temp, argv)) < 0) {
+		cprintf("sys_exec error %e\n", r);
+		goto error;
+	}
+
+	child = r;
+
+	close(fd);
+	fd = -1;
+	return child;
+
+error:
+	sys_env_destroy(0);
+	close(fd);
+	return r;
 }
 

@@ -4,6 +4,7 @@
 #include <inc/error.h>
 #include <inc/string.h>
 #include <inc/assert.h>
+#include <inc/elf.h>
 
 #include <kern/env.h>
 #include <kern/pmap.h>
@@ -13,6 +14,8 @@
 #include <kern/sched.h>
 
 #define FALSE 0
+
+static envid_t load_icode_ch(struct Env *e, uint8_t *binary,const char** argv);
 // Print a string to the system console.
 // The string is exactly 'len' characters long.
 // Destroys the environment on memory errors.
@@ -57,6 +60,10 @@ sys_env_destroy(envid_t envid)
 
 	if ((r = envid2env(envid, &e, 1)) < 0)
 		return r;
+	if (e == curenv)
+		cprintf("[%08x] exiting gracefully\n", curenv->env_id);
+	else
+		cprintf("[%08x] destroying %08x\n", curenv->env_id, e->env_id);
 	env_destroy(e);
 	return 0;
 }
@@ -130,7 +137,18 @@ sys_env_set_trapframe(envid_t envid, struct Trapframe *tf)
 	// LAB 5: Your code here.
 	// Remember to check whether the user has supplied us with a good
 	// address!
-	panic("sys_env_set_trapframe not implemented");
+    
+    struct Env* e;
+    if(envid2env(envid,&e,1) == -E_BAD_ENV) return -E_BAD_ENV;
+    
+    user_mem_assert(e, (void *) tf, sizeof(struct Trapframe), PTE_U);
+    //verify that tf have CPL 3
+    tf->tf_cs |= 0x3;
+    //0x200 is the interrupts enabled bit
+    tf->tf_eflags |= 0x0200;
+    e->env_tf = *tf;
+    
+    return 0;
 }
 
 // Set the page fault upcall for 'envid' by modifying the corresponding struct
@@ -198,8 +216,8 @@ sys_page_alloc(envid_t envid, void *va, int perm)
      
     if(((uintptr_t)va >= UTOP) ||(((uintptr_t)va % PGSIZE) != 0)) return -E_INVAL;
     
-    if((perm != (PTE_U | PTE_P)) && (perm != (PTE_U | PTE_P | PTE_AVAIL)) && (perm != (PTE_U | PTE_P | PTE_W))
-        && (perm != (PTE_U | PTE_P | PTE_AVAIL | PTE_W))) return -E_INVAL;
+	if((perm & (PTE_U|PTE_P)) != (PTE_U|PTE_P) || (perm & ~PTE_SYSCALL))
+		return - E_INVAL;
     
     struct PageInfo* new_page = page_alloc(ALLOC_ZERO);
     if(!new_page) return -E_NO_MEM;
@@ -326,35 +344,30 @@ static int
 sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 {
 	// LAB 4: Your code here.
-    struct Env* env;
-    pte_t* pte;
-    struct PageInfo* p;
-    
-    if(envid2env(envid, &env, 0)) return - E_BAD_ENV;
-    if(env->env_ipc_recving == 0) return -E_IPC_NOT_RECV;
-    if(((uintptr_t)srcva < UTOP) &&(((uintptr_t)srcva % PGSIZE) != 0)) return -E_INVAL;
-    
-    
-    if(srcva < (void *) UTOP) {
-		p = page_lookup(curenv->env_pgdir, srcva, &pte);
-		if(!p) return - E_INVAL;
-		if((*pte & perm) != perm) return - E_INVAL;
+	struct Env * env;
+	if(envid2env(envid, &env, 0)) return - E_BAD_ENV;
+	if(!env->env_ipc_recving) return - E_IPC_NOT_RECV;
+	if(srcva < (void *) UTOP) {
+		if(srcva != ROUNDDOWN(srcva, PGSIZE)) return - E_INVAL;
+
+		pte_t * pte;
+		struct PageInfo * pp = page_lookup(curenv->env_pgdir, srcva, &pte);
+		if(!pp) return - E_INVAL;
+
+		if((perm & PTE_SYSCALL) != perm) return - E_INVAL;
 		if((perm & PTE_W) && !(*pte & PTE_W)) return -E_INVAL;
 		if(env->env_ipc_dstva < (void *) UTOP) {
-			if(page_insert(env->env_pgdir, p, env->env_ipc_dstva, perm)) return - E_NO_MEM;
+			if(page_insert(env->env_pgdir, pp, env->env_ipc_dstva, perm)) return - E_NO_MEM;
 			env->env_ipc_perm = perm;
 		}
 	}
-    
-    env->env_ipc_perm = perm;
-    env->env_ipc_recving = FALSE;
+
+	env->env_ipc_recving = 0;
 	env->env_ipc_from = curenv->env_id;
 	env->env_ipc_value = value;
 	env->env_status = ENV_RUNNABLE;
 	env->env_tf.tf_regs.reg_eax = 0;
-    
 	return 0;
-    
 }
 
 // Block until a value is ready.  Record that you want to receive
@@ -378,6 +391,13 @@ sys_ipc_recv(void *dstva)
 	curenv->env_ipc_dstva = dstva;
 	sys_yield();
 	return 0;
+}
+
+static int sys_exec(void* binary,const char **argv){
+    load_icode_ch(curenv,(uint8_t*) binary,argv); 
+    
+    sched_yield();
+	return curenv->env_id;
 }
 
 // Dispatches to the correct kernel function, passing the arguments.
@@ -434,10 +454,84 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 			return sys_ipc_recv((void *) a1);
 			break;
             
+        case SYS_env_set_trapframe:
+            return sys_env_set_trapframe((envid_t) a1, (struct Trapframe *) a2);
+            
+            case SYS_exec:
+                return sys_exec((void*) a1,(const char**)a2);
+            
 	default:
 		return -E_INVAL;
 	}
     
     return 0;
 }
+
+
+
+//======================== for challenge=====================//
+static envid_t
+load_icode_ch(struct Env *e, uint8_t *binary,const char **argv)
+{
+	struct  Elf * elfHeader = (struct Elf *) binary;
+
+	struct Proghdr *ph, *eph;
+
+	// is this a valid ELF?
+	if (elfHeader->e_magic != ELF_MAGIC)
+		panic("ELF is not valid");
+
+	// load each program segment (ignores ph flags)
+	ph = (struct Proghdr *) ((uint8_t *) elfHeader + elfHeader->e_phoff);
+	eph = ph + elfHeader->e_phnum;
+
+	for (; ph < eph; ph++) {
+		if(ph->p_type == ELF_PROG_LOAD) {
+			region_alloc(curenv, (void *) ph->p_va, ph->p_memsz);
+
+			memset((void *) ph->p_va, 0, ph->p_memsz);
+			memcpy((void *) ph->p_va, binary + ph->p_offset, ph->p_filesz);
+		}
+	}
+
+	uint32_t argc;
+	size_t string_size = 0;	
+	char arg_buf[100];
+	char * string_store;
+	uintptr_t *argv_store;
+
+	for(argc = 0; argv[argc] != 0; argc++) {
+		if(string_size + strlen(argv[argc]) >= 100) break;
+		strcpy(arg_buf + string_size, argv[argc]);
+		string_size += strlen(argv[argc]) + 1;
+		arg_buf[string_size - 1] = '\0';
+	}
+
+	string_store = (char *) USTACKTOP - string_size;
+	argv_store = (uintptr_t *)(ROUNDDOWN(string_store, 4) - 4 * (argc + 1));
+
+	if((void *)(argv_store - 2) < (void *) USTACKTOP - PGSIZE)
+		return - E_NO_MEM;
+
+	uint32_t i;
+	char *p = arg_buf;
+	for(i = 0; i < argc; i++) {
+		argv_store[i] = (intptr_t) string_store;
+		strcpy(string_store, p);
+		string_store += strlen(p) + 1;
+		p += strlen(p) + 1;
+	}
+	argv_store[argc] = 0;
+	assert(string_store == (char *) USTACKTOP);
+
+	argv_store[-1] = (intptr_t) argv_store;
+	argv_store[-2] = argc;
+
+	curenv->env_tf.tf_eip = elfHeader->e_entry;
+	curenv->env_tf.tf_esp = (intptr_t) &argv_store[-2];
+
+	sched_yield();
+	return curenv->env_id;
+}
+
 

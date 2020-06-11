@@ -58,13 +58,20 @@ duppage(envid_t envid, unsigned pn)
     void* addr = (void*)(pn * PGSIZE);
     
     //if the page is write or cow
-    if((uvpt[pn] & PTE_W) || (uvpt[pn] * PTE_COW)) {
-    if(sys_page_map(0, addr, envid, addr, PTE_P | PTE_U | PTE_COW) <  0) panic("page mapping problem_1\n");
-    if(sys_page_map(0, addr, 0, addr, PTE_P | PTE_U | PTE_COW) < 0) panic("page mapping problem_2\n");
+    
+    if(((uvpt[pn] & PTE_W) || (uvpt[pn] * PTE_COW)) && !(uvpt[pn] & PTE_SHARE)) {
+        
+        if(sys_page_map(0, addr, envid, addr, ((uvpt[pn] & PTE_SYSCALL) & ~(PTE_W)) | PTE_COW) <  0) 
+            panic("page mapping problem_1\n");
+    
+        if(sys_page_map(0, addr, 0, addr, ((uvpt[pn] & PTE_SYSCALL) & ~(PTE_W)) | PTE_COW) < 0) 
+            panic("page mapping problem_2\n");
     return 0;
     }
     
-    if(sys_page_map(0, addr, envid, addr, PTE_P | PTE_U) < 0) panic("page mapping problem_3\n"); 
+    else
+        if(sys_page_map(0, addr, envid, addr, uvpt[pn] & PTE_SYSCALL) < 0 )
+            panic("page mapping problem_3\n");
 	return 0;
 }
 

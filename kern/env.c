@@ -282,7 +282,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 // Pages should be writable by user and kernel.
 // Panic if any allocation attempt fails.
 //
-static void
+void
 region_alloc(struct Env *e, void *va, size_t len)
 {
     // LAB 3: Your code here.
@@ -369,10 +369,6 @@ load_icode(struct Env *e, uint8_t *binary)
 void
 env_create(uint8_t *binary, enum EnvType type)
 {
-	// LAB 3: Your code here.
-
-	// If this is the file server (type == ENV_TYPE_FS) give it I/O privileges.
-	// LAB 5: Your code here.
     struct Env* e;
     int res = env_alloc(&e,0);
     if(res == -E_NO_FREE_ENV) panic("env_create : env.c - enviroment limit exceed\n");
@@ -380,6 +376,10 @@ env_create(uint8_t *binary, enum EnvType type)
 
     load_icode(e,binary);
     e->env_type = type;
+    
+    // If this is the file server (type == ENV_TYPE_FS) give it I/O privileges.
+    if(type == ENV_TYPE_FS) 
+        e->env_tf.tf_eflags |= 0x3000;  
 }
 
 //

@@ -47,21 +47,17 @@ ipc_recv(envid_t *from_env_store, void *pg, int *perm_store)
 //   Use sys_yield() to be CPU-friendly.
 //   If 'pg' is null, pass sys_ipc_try_send a value that it will understand
 //   as meaning "no page".  (Zero is not the right value.)
-void
-ipc_send(envid_t to_env, uint32_t val, void *pg, int perm)
+void ipc_send(envid_t to_env, uint32_t val, void *pg, int perm)
 {
 	// LAB 4: Your code here.
-    if(pg == NULL) pg = NOPAGE;
-    
-    int res;
-    do{
-        res = sys_ipc_try_send(to_env, val, pg, perm);
-        if(res == 0) break;		
-        if(res != -E_IPC_NOT_RECV) panic("ipc_send - error happend while waiting to send");
+	if(!pg) pg = (void *) - 1;
+	int ret;
+	while((ret = sys_ipc_try_send(to_env, val, pg, perm))) {
+		if(ret == 0) break;
+		if(ret != - E_IPC_NOT_RECV)
+			panic("a real error happend while waiting");
 		sys_yield();
-    }
-    while(res != 0);
-    
+	}
 }
 
 // Find the first environment of the given type.  We'll use this to
