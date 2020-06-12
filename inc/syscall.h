@@ -10,7 +10,7 @@ enum {
 	SYS_page_alloc,
 	SYS_page_map,
 	SYS_page_unmap,
-   	 SYS_yield,
+    SYS_yield,
 	SYS_exofork,
 	SYS_env_set_status,
 	SYS_env_set_trapframe,
@@ -19,7 +19,8 @@ enum {
 	SYS_ipc_try_send,
 	SYS_ipc_recv,
 	SYS_time_msec,
-        SYS_exec,
+    SYS_exec,
+    SYS_send_packet,
 	NSYSCALLS
 };
 

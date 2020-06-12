@@ -133,4 +133,9 @@ sys_exec(void * binary,const char** argv) {
 	return syscall(SYS_exec, (uint32_t) binary, 0,0, 0, 0, 0);
 }
 
+int
+sys_send_packet(void *srcva, size_t len)
+{
+	return syscall(SYS_send_packet, 1, (uint32_t)srcva, (uint32_t)len, 0, 0, 0);
+}
 
