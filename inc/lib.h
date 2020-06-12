@@ -63,6 +63,7 @@ int	sys_ipc_recv(void *rcv_pg);
 unsigned int sys_time_msec(void);
 int sys_exec(void* binary,const char** argv);
 int sys_send_packet(void* src, uint32_t len);
+int sys_recv_packet(void *dstva, uint16_t *len_store);
 
 // This must be inlined.  Exercise for reader: why?
 static __inline envid_t __attribute__((always_inline))

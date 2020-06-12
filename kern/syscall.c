@@ -423,6 +423,19 @@ sys_send_packet(void *srcva, size_t len)
     return transmit(srcva, len);
 }
 
+// Returns 0 on success.
+// Returns <0 on error. Errors are:
+//      -E_INVAL if the range [dstva, dstva+E1000_ETH_PACKET_LEN) is not mapped or
+//          if the user does not have R/W permissions on this region.
+static int
+sys_recv_packet(void *dstva, uint16_t *len_store)
+{
+    if (user_mem_check(curenv, dstva, E1000_ETH_PACKET_LEN, PTE_U|PTE_W) < 0)
+        return -E_INVAL;
+
+    return recieve(dstva, len_store);
+}
+
 // Dispatches to the correct kernel function, passing the arguments.
 int32_t
 syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5)
@@ -488,6 +501,9 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
             
         case SYS_send_packet:
             return sys_send_packet((void *) a1, (size_t) a2);
+            
+        case SYS_recv_packet:
+            return sys_recv_packet((void *) a1, (uint16_t *) a2);
             
 	default:
 		return -E_INVAL;
