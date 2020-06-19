@@ -65,8 +65,8 @@ void	tlb_invalidate(pde_t *pgdir, void *va);
 
 void *	mmio_map_region(physaddr_t pa, size_t size);
 
-int	user_mem_check(struct Env *env, const void *va, size_t len, int perm);
-void	user_mem_assert(struct Env *env, const void *va, size_t len, int perm);
+int user_mem_check(struct Env *env, const void *va, size_t len, int perm);
+void user_mem_assert(struct Env *env, const void *va, size_t len, int perm);
 
 static inline physaddr_t
 page2pa(struct PageInfo *pp)
@@ -89,5 +89,9 @@ page2kva(struct PageInfo *pp)
 }
 
 pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create);
+
+//--------------------------------------lab6:challenge--------------------------------------//
+int user_mem_phy_addr(struct Env *env, uintptr_t va, physaddr_t *pa_store);
+int user_mem_page_replace(uintptr_t va, struct PageInfo *pt);
 
 #endif /* !JOS_KERN_PMAP_H */

@@ -688,6 +688,43 @@ user_mem_assert(struct Env *env, const void *va, size_t len, int perm)
 	}
 }
 
+//--------------------------------------lab6:challenge--------------------------------------//
+int
+user_mem_phy_addr(struct Env *env, uintptr_t va, physaddr_t *pa_store)
+{
+	int r;
+	if ((r = user_mem_check(env, (void *)va, 0, PTE_U)) < 0) {
+		*pa_store = 0;
+		return r;
+	}
+
+	physaddr_t pa = 0;
+	struct PageInfo *pp;
+	pp = page_lookup(curenv->env_pgdir, (void *)va, 0);
+	*pa_store = page2pa(pp) | PGOFF(va);
+
+	return 0;
+}
+int
+user_mem_page_replace(uintptr_t va, struct PageInfo *pt)
+{
+	user_mem_assert(curenv, (const void *)va, PGSIZE, PTE_U| PTE_P);
+
+	pte_t *ppet;
+	struct PageInfo *po = page_lookup(curenv->env_pgdir, (void *)va, &ppet);
+
+	// Exchange pp_ref
+	int ref = po->pp_ref;
+	po->pp_ref = pt->pp_ref;
+	pt->pp_ref = ref;
+
+	// Update the new PageInfo backend, leave permit unchange.
+	*ppet = page2pa(pt) | PGOFF(*ppet);
+	tlb_invalidate(curenv->env_pgdir, (void*)va);
+
+	return 0;
+}
+//--------------------------------------lab6:challenge--------------------------------------//
 
 // --------------------------------------------------------------
 // Checking functions.

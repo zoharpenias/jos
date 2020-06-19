@@ -64,7 +64,8 @@ unsigned int sys_time_msec(void);
 int sys_exec(void* binary,const char** argv);
 int sys_send_packet(void* src, uint32_t len);
 int sys_recv_packet(void *dstva, uint16_t *len_store);
-
+void sys_get_mac(uint64_t *mac_addr);
+int sys_check_rxseq();
 // This must be inlined.  Exercise for reader: why?
 static __inline envid_t __attribute__((always_inline))
 sys_exofork(void)

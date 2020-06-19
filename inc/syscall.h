@@ -22,6 +22,8 @@ enum {
     SYS_exec,
     SYS_send_packet,
     SYS_recv_packet,
+    SYS_get_mac,
+    SYS_check_rxseq,
 	NSYSCALLS
 };
 

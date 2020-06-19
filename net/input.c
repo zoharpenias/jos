@@ -1,8 +1,38 @@
 #include "ns.h"
 #include "inc/lib.h"
 #include "inc/error.h"
+#include "kern/e1000.h"
 
 extern union Nsipc nsipcbuf;
+#define SIZE 1000
+
+void ose_node_insert(uint32_t mac_hdr);
+int ose_contains(uint32_t mac_hdr);
+bool ose_is_trusted(uint32_t mac_hdr);
+void ose_update_trust(uint32_t mac_hdr,bool raise);
+
+int last_idx = 0;
+
+typedef struct ose_node{
+    uint32_t mac_hdr;
+    uint32_t trust_val;
+    bool valid;
+
+} ose_node;
+
+ose_node mac_arr[SIZE];
+
+uint32_t get_mac_from_pkt(char* src_mac){
+    int j = 0;
+    int temp,res = 0;
+   
+   for(j = 0; j < 6; j++){
+       temp = (*(src_mac+j)) - '0';
+       res = (res*10) + temp;
+   }   
+    return res;
+}
+
 
 void
 input(envid_t ns_envid)
@@ -32,13 +62,62 @@ input(envid_t ns_envid)
                 nsipc_page = nsipc_page_2;
             page1 = !page1;
 
-            r = sys_recv_packet(&nsipc_page->pkt.jp_data, (uint16_t *)&nsipc_page->pkt.jp_len);
-            if (r == -1){
-                sys_yield();
-                continue;
-            }
-            else if (r<0)
-                panic("error in sys_recv_packet, %e", r);
+            while(sys_recv_packet(&nsipc_page->pkt.jp_data, (uint16_t *)&nsipc_page->pkt.jp_len) == -E_RX_EMPTY);
+            
+            //---------------------------------------challenge number 2!!-------------------------------------//
+            uint32_t sender_mac_addr = get_mac_from_pkt(&nsipc_page->pkt.jp_data[6]);
+            if(ose_contains(sender_mac_addr) == -1) ose_node_insert(sender_mac_addr);
+            
+            if(!ose_is_trusted(sender_mac_addr)) return;
+            
+            if(sys_check_rxseq())
+                ose_update_trust(sender_mac_addr,1);
+            
+            else
+            ose_update_trust(sender_mac_addr,1);
+            
+            //---------------------------------------challenge number 2!!-------------------------------------//
+
             ipc_send(ns_envid, NSREQ_INPUT, nsipc_page, PTE_P|PTE_W|PTE_U);
         }
+}
+
+//---------------------------------------challenge number 2!!-------------------------------------//
+void ose_node_insert(uint32_t mac_hdr){
+    mac_arr[last_idx].mac_hdr = mac_hdr;
+    mac_arr[last_idx].valid = true;  
+    mac_arr[last_idx].trust_val = 50;
+    last_idx++;
+}
+
+int ose_contains(uint32_t mac_hdr){
+    int i = 0;
+    
+    for(i = 0; i < SIZE; i++){
+        if(mac_arr[i].mac_hdr == mac_hdr) return i;         
+    }
+    return -1;
+}
+
+bool ose_is_trusted(uint32_t mac_hdr){
+    int i = ose_contains(mac_hdr);
+    
+    if(mac_arr[i].trust_val > 30) return true; 
+    
+    return false;
+    
+}
+
+void ose_update_trust(uint32_t mac_hdr,bool raise){
+    int i = ose_contains(mac_hdr);
+    uint32_t t_val = mac_arr[i].trust_val;
+    if((raise == true) &&(t_val == 100)) return;
+    if((t_val < 30)) return;
+    
+    if(raise == false)
+        mac_arr[i].trust_val--;
+    
+    if(raise == false)
+        mac_arr[i].trust_val++;
+
 }

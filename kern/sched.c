@@ -29,6 +29,7 @@ sched_yield(void)
 	// below to halt the cpu.
     
 	uint32_t i, e, cur = curenv == NULL ? 0 : ENVX(curenv->env_id);
+      
 	for(i = 0; i < NENV; ++i) {
 		e = (cur + i) % NENV;
 		if(envs[e].env_status == ENV_RUNNABLE)
@@ -37,6 +38,13 @@ sched_yield(void)
 
 	if(curenv && curenv->env_status == ENV_RUNNING)
 		env_run(curenv);
+    
+    for (i = 0; i < NENV; i++) {
+		if (envs[i].e1000_waiting) {
+			envs[i].e1000_waiting = false;
+			env_run(&envs[i]);
+		}
+	}
 
 	// sched_halt never returns
 	sched_halt();

@@ -14,6 +14,7 @@
 #include <kern/cpu.h>
 #include <kern/spinlock.h>
 #include <kern/time.h>
+#include <kern/e1000.h>
 
 #define trap_number 49
 static struct Taskstate ts;
@@ -237,11 +238,17 @@ trap_dispatch(struct Trapframe *tf)
         return;
     }
     
-        if(tf->tf_trapno == IRQ_OFFSET + IRQ_SERIAL){
+    if(tf->tf_trapno == IRQ_OFFSET + IRQ_SERIAL){
         serial_intr();
         return;
     }
 
+    if(tf->tf_trapno == IRQ_OFFSET + e1000_irq){
+        e1000_trap_handler();
+        return;
+    }
+    
+    
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
 	if (tf->tf_cs == GD_KT)

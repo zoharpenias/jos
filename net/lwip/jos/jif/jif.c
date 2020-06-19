@@ -54,19 +54,28 @@ struct jif {
 static void
 low_level_init(struct netif *netif)
 {
-    int r;
+    int i;
 
     netif->hwaddr_len = 6;
     netif->mtu = 1500;
     netif->flags = NETIF_FLAG_BROADCAST;
 
     // MAC address is hardcoded to eliminate a system call
+   
+//for the challenge - 6 lines below should be commented 
+/*
     netif->hwaddr[0] = 0x52;
     netif->hwaddr[1] = 0x54;
     netif->hwaddr[2] = 0x00;
     netif->hwaddr[3] = 0x12;
     netif->hwaddr[4] = 0x34;
     netif->hwaddr[5] = 0x56;
+ */   
+//for the challenge - should be uncommented
+    uint64_t hwaddr = 0; 
+    sys_get_mac(&hwaddr);
+    for (i = 0; i < 6; i++)
+        netif->hwaddr[i] = (uint8_t)((hwaddr>>(8*i)) & 0xff);
 }
 
 /*

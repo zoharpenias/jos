@@ -417,10 +417,27 @@ static int sys_exec(void* binary,const char **argv){
 static int
 sys_send_packet(void *srcva, size_t len)
 {
+    int r = 1;
+    physaddr_t paddr;
+    int num_tries = 20;
+    
     if (user_mem_check(curenv, srcva, len, PTE_U) < 0)
         return -E_INVAL;
+       
+	r = user_mem_phy_addr(curenv, (uintptr_t)srcva, &paddr);
+	if (r < 0)
+		return r;
+	
+    
+	while((transmit((void*)paddr, len) < 0) && (num_tries > 0)) {
+		num_tries--;
+        //sys_yield();
+	}
 
-    return transmit(srcva, len);
+	if (num_tries == 0)
+		return -E_TX_FULL;
+
+    return 0; 
 }
 
 // Returns 0 on success.
@@ -432,8 +449,33 @@ sys_recv_packet(void *dstva, uint16_t *len_store)
 {
     if (user_mem_check(curenv, dstva, E1000_ETH_PACKET_LEN, PTE_U|PTE_W) < 0)
         return -E_INVAL;
+    
+        int r = recieve(dstva, len_store);
+        if(r == 0 ) return 0;
+        curenv->env_status = ENV_NOT_RUNNABLE;
+        curenv->e1000_waiting = true;
+        curenv->env_tf.tf_regs.reg_eax = -E_RX_EMPTY;
+        sys_yield();
+        
+    return r;
+    
+}
 
-    return recieve(dstva, len_store);
+static void
+sys_get_mac(uint64_t *addr_store)
+{
+    uint64_t macaddr = get_mac();
+    *addr_store = macaddr;
+}
+
+int sys_check_rxseq()
+{
+    int res = 1;
+    if(E1000_ICR_RXSEQ & E1000_ICR) res = 0;
+    (*(uint32_t *)(E1000_addr+E1000_ICR)) &= (~E1000_ICR_RXSEQ);
+    
+    return res;
+
 }
 
 // Dispatches to the correct kernel function, passing the arguments.
@@ -504,6 +546,13 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
             
         case SYS_recv_packet:
             return sys_recv_packet((void *) a1, (uint16_t *) a2);
+            
+        case (SYS_get_mac):
+			sys_get_mac((uint64_t *) a1);
+            break;
+            
+        case(SYS_check_rxseq):
+            return sys_check_rxseq();
             
 	default:
 		return -E_INVAL;

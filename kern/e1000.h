@@ -4,11 +4,15 @@
 #include <inc/string.h>
 
 typedef uint8_t packet_t[2048];
-
+extern uint8_t e1000_irq;
+volatile void* E1000_addr;
 // Kernel functions
 int OSE_attach_E1000(struct pci_func *pcif);
 int transmit(void * data_addr, uint16_t length);
 int recieve(void * data_addr, uint16_t* length);
+void e1000_trap_handler(void);
+uint64_t get_mac();
+uint16_t read_mac_from_eeprom(uint32_t addr);
 
 #define E1000_TXDARR_LEN     32  /* Length of the tx descriptor ring */
 #define E1000_RXDARR_LEN     128 /* Length of the rx descriptor ring */
@@ -31,7 +35,7 @@ struct rx_desc {
     uint16_t csum;        /* Packet checksum */
     uint8_t status;       /* Descriptor status */
     uint8_t errors;       /* Descriptor Errors */
-    uint16_t special;
+    uint16_t special; 
 };
 
 
@@ -394,5 +398,20 @@ struct rx_desc {
 #define PHY_1000T_CTRL   0x09 /* 1000Base-T Control Reg */
 #define PHY_1000T_STATUS 0x0A /* 1000Base-T Status Reg */
 #define PHY_EXT_STATUS   0x0F /* Extended Status Reg */
+
+#define E1000_RXT0	0x00000080
+#define E1000_RCTL_LBM_NO       0xffffff3f /* no loopback mode, 6 & 7 bit set to 0 */ 
+#define E1000_RSRPD    0x02C00  /* RX Small Packet Detect - RW */
+#define E1000_ICR_SRPD          0x00010000
+#define E1000_IMS_SRPD      E1000_ICR_SRPD
+#define E1000_ICR_RXO           0x00000040 /* rx overrun */
+#define E1000_IMS_RXO       E1000_ICR_RXO       /* rx overrun */
+#define E1000_ICR_RXSEQ         0x00000008 /* rx sequence error */
+#define E1000_IMS_RXSEQ     E1000_ICR_RXSEQ     /* rx sequence error */
+#define E1000_ICR_RXT0          0x00000080 /* rx timer intr (ring 0) */
+#define E1000_IMS_RXT0      E1000_ICR_RXT0      /* rx timer intr */
+#define E1000_ICR_TXQE          0x00000002 /* Transmit Queue empty */
+#define E1000_IMS_TXQE      E1000_ICR_TXQE      /* Transmit Queue empty */
+#define E1000_ICS_RXSEQ     E1000_ICR_RXSEQ     /* rx sequence error */
 
 #endif	// JOS_KERN_E1000_H

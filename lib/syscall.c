@@ -145,3 +145,12 @@ sys_recv_packet(void *dstva, uint16_t *len_store)
     return syscall(SYS_recv_packet, 1, (uint32_t)dstva, (uint32_t)len_store, 0, 0, 0);
 }
 
+void sys_get_mac(uint64_t *mac_addr)
+{
+	syscall(SYS_get_mac, 0, (uint32_t) mac_addr, 0, 0, 0, 0);
+}
+
+int sys_check_rxseq()
+{
+    return syscall(SYS_check_rxseq , 0, 0, 0, 0, 0, 0);
+}
