@@ -92,8 +92,13 @@ void rx_init(void){
     *(uint32_t *)(E1000_addr+E1000_RDH) = 0;
     *(uint32_t *)(E1000_addr+E1000_RDT) = E1000_RXDARR_LEN;
 
-    for (i = 0; i< E1000_RXDARR_LEN; i++)
-        rxd_arr[i].buffer_addr = (uint32_t)(PADDR(rxd_bufs+i));
+    for (i = 0; i< E1000_RXDARR_LEN; i++){
+        struct PageInfo *pp = page_alloc(1);
+        //if (!pp) return -E_NO_MEM;
+        ++pp->pp_ref;
+		rxd_arr[i].buffer_addr = page2pa(pp) + 4;
+    }
+        //rxd_arr[i].buffer_addr = (uint32_t)(PADDR(rxd_bufs+i));
         rxd_arr[i].status = 0;
         rxd_arr[i].special = 0;
         
@@ -109,11 +114,13 @@ int recieve(void * data_addr, uint16_t* length){
     static uint32_t next_idx = 0;
     struct rx_desc* next_ptr = (&rxd_arr[next_idx]);
     
+    if (!length) return -E_INVAL;  
     // Buffer is empty
     if (!(next_ptr->status & E1000_RXD_STAT_DD))
         return -E_RX_EMPTY; 
-
+/*
     *length = next_ptr->length;
+    
     memcpy(data_addr, (rxd_bufs+next_idx), next_ptr->length);
     
     rxd_arr[next_idx].buffer_addr = (uint32_t)(PADDR(rxd_bufs+next_idx));
@@ -123,6 +130,24 @@ int recieve(void * data_addr, uint16_t* length){
     *(uint32_t *)(E1000_addr+E1000_RDT) = next_idx;
     next_idx = (next_idx+1)%E1000_RXDARR_LEN;
     return 0;
+    
+    */
+
+    // change the mapping of the virtual address "data_addr" in the curenv to be to the physical address of the packets
+	struct PageInfo *pp = pa2page(rxd_arr[next_idx].buffer_addr);
+	if (page_insert(curenv->env_pgdir, pp, data_addr ,PTE_W|PTE_U|PTE_P) < 0) return -E_NO_MEM;
+	page_decref(pp);
+    *length = rxd_arr[next_idx].length;
+    
+	pp = page_alloc(1);
+	if (!pp) return -E_NO_MEM;
+	rxd_arr[next_idx].buffer_addr = page2pa(pp) + 4;
+	pp->pp_ref++;
+
+	next_idx++;
+	next_idx = next_idx % E1000_RXDARR_LEN;
+
+	return 0;
 }
 
 void
@@ -165,9 +190,6 @@ int OSE_attach_E1000(struct pci_func *pcif)
     
     pci_func_enable(pcif);
     E1000_addr = mmio_map_region(pcif->reg_base[0],pcif->reg_size[0]);
-    //network_regs = (uint32_t*)E1000_addr;
-    //panic("%d : %d",network_regs,E1000_addr); // check device status register
-    //read_mac_from_eeprom();
 
     tx_init(); 
     rx_init();

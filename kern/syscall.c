@@ -447,10 +447,15 @@ sys_send_packet(void *srcva, size_t len)
 static int
 sys_recv_packet(void *dstva, uint16_t *len_store)
 {
+    int r;
     if (user_mem_check(curenv, dstva, E1000_ETH_PACKET_LEN, PTE_U|PTE_W) < 0)
         return -E_INVAL;
     
-        int r = recieve(dstva, len_store);
+    	struct rx_desc kr = *(struct rx_desc*)dstva;
+        physaddr_t paddr;
+        r = user_mem_phy_addr(curenv,((struct rx_desc*)dstva)->buffer_addr, &paddr);
+    
+        r = recieve(dstva, len_store);
         if(r == 0 ) return 0;
         curenv->env_status = ENV_NOT_RUNNABLE;
         curenv->e1000_waiting = true;
