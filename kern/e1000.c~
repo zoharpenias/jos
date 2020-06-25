@@ -1,0 +1,217 @@
+#include <kern/e1000.h>
+#include <kern/pmap.h>
+#include <inc/error.h>
+#include <kern/picirq.h>
+#include <kern/cpu.h>
+#include <kern/env.h>
+#include <inc/string.h>
+
+#define NUM_MAC_WORDS 3
+#define E1000_EERD_ADDR 8 
+#define EERD_DATA 16 
+#define EERD_DONE 0x00000010 
+#define EERD_READ 0x00000001 
+
+int i; // global iterator
+struct tx_desc txd_arr[E1000_TXDARR_LEN] __attribute__((aligned(4096)));
+struct rx_desc rxd_arr[E1000_RXDARR_LEN] __attribute__((aligned(4096)));
+packet_t txd_bufs[E1000_TXDARR_LEN] __attribute__((aligned(4096)));
+packet_t rxd_bufs[E1000_RXDARR_LEN] __attribute__((aligned(4096)));
+// LAB 6: Your driver code here
+extern volatile void* E1000_addr;
+volatile uint32_t* network_regs;
+uint8_t e1000_irq;
+uint32_t io_base;
+static int g_idx = 0;
+uint16_t mac_addr[NUM_MAC_WORDS];
+uint64_t macaddr = 0;
+
+void tx_init(void){
+    
+    *(uint32_t *)(E1000_addr+E1000_TDBAL) = (uint32_t)(PADDR(txd_arr)); // Indicates start of descriptor ring buffer
+    *(uint32_t *)(E1000_addr+E1000_TDBAH) = 0; // Make sure high bits are set to 0
+    *(uint16_t *)(E1000_addr+E1000_TDLEN) = (uint16_t)(sizeof(struct tx_desc)*E1000_TXDARR_LEN); // Indicates length of descriptor ring buffer
+    *(uint32_t *)(E1000_addr+E1000_TDH) = 0;
+    *(uint32_t *)(E1000_addr+E1000_TDT) = 0;
+    *(uint32_t *)(E1000_addr+E1000_TCTL) = (E1000_TCTL_EN | E1000_TCTL_PSP | E1000_TCTL_CT | E1000_TCTL_COLD);
+    *(uint16_t *)(E1000_addr+E1000_TIPG) = (uint16_t)(E1000_TIPG_IPGT | E1000_TIPG_IPGR1 | E1000_TIPG_IPGR2);
+
+    // Initialize CMD bits for transmit descriptors
+    for (i = 0; i < E1000_TXDARR_LEN; i++){
+        txd_arr[i].buffer_addr = (uint32_t)(PADDR(txd_bufs+i));
+        txd_arr[i].cso = 0;
+        txd_arr[i].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+        txd_arr[i].status = 0;
+        txd_arr[i].css = 0;
+        txd_arr[i].special = 0;
+        txd_arr[i].status = E1000_TXD_STAT_DD;
+    }
+}
+
+int transmit(void * data_addr, uint16_t length){
+    //static because the head can be in differnt location every time(cyclic buffer)
+    static uint32_t next_idx = 0;
+    struct tx_desc* next_ptr = (&txd_arr[next_idx]);    
+    
+    //if the buffer is full return error
+    if (!(next_ptr->status & E1000_TXD_STAT_DD)) 
+        return -1;
+
+    //make sure that the packet does not Exceeds its max size
+    length = (length > E1000_ETH_PACKET_LEN) ? E1000_ETH_PACKET_LEN: length;
+
+
+//-------------------------------------------challenge-------------------------------------------//
+    //txd_arr[next_idx].buffer_addr = (uint32_t)(PADDR(txd_bufs+next_idx));
+    txd_arr[next_idx].buffer_addr = (uint32_t)(data_addr);
+//-------------------------------------------challenge-------------------------------------------//
+    txd_arr[next_idx].cso = 0;
+    txd_arr[next_idx].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+    txd_arr[next_idx].status = 0;
+    txd_arr[next_idx].css = 0;
+    txd_arr[next_idx].special = 0;
+    
+    next_ptr->length = length;
+    //memcpy((void*)(txd_bufs+next_idx), data_addr, length);
+
+    next_idx = (next_idx+1)%E1000_TXDARR_LEN;
+    g_idx = next_idx;
+    *(uint32_t *)(E1000_addr+E1000_TDT) = next_idx;
+    
+    return next_idx;
+}
+
+void rx_init(void){
+    uint64_t macaddr_local = get_mac();
+    
+    *(uint32_t *)(E1000_addr+E1000_RAL) = (uint32_t)(macaddr_local & 0xffffffff); // Set mac address for filtering
+    *(uint32_t *)(E1000_addr+E1000_RAH) = (uint32_t)(macaddr_local>>32);
+    *(uint32_t *)(E1000_addr+E1000_RDBAL) = (uint32_t)(PADDR(rxd_arr)); // Indicates start of descriptor ring buffer
+    *(uint32_t *)(E1000_addr+E1000_RDBAH) = 0; // Make sure high bits are set to 0
+    *(uint16_t *)(E1000_addr+E1000_RDLEN) = (uint16_t)(sizeof(struct rx_desc)*E1000_RXDARR_LEN); // Indicates length of descriptor ring buffer
+    *(uint32_t *)(E1000_addr+E1000_RDH) = 0;
+    *(uint32_t *)(E1000_addr+E1000_RDT) = E1000_RXDARR_LEN;
+
+    for (i = 0; i< E1000_RXDARR_LEN; i++)
+        rxd_arr[i].buffer_addr = (uint32_t)(PADDR(rxd_bufs+i));
+        rxd_arr[i].status = 0;
+        rxd_arr[i].special = 0;
+        
+        /*
+        configure the RCTL reg to allow:
+        reciever enable + broadcast packet + set the HW buff to be as SW buff + strip CRC
+        */
+        *(uint32_t *)(E1000_addr+E1000_RCTL) = (E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_BSIZE | E1000_RCTL_SECRC);
+}
+
+int recieve(void * data_addr, uint16_t* length){
+    
+    static uint32_t next_idx = 0;
+    struct rx_desc* next_ptr = (&rxd_arr[next_idx]);
+    
+    // Buffer is empty
+    if (!(next_ptr->status & E1000_RXD_STAT_DD))
+        return -E_RX_EMPTY; 
+
+    *length = next_ptr->length;
+    memcpy(data_addr, (rxd_bufs+next_idx), next_ptr->length);
+    
+    rxd_arr[next_idx].buffer_addr = (uint32_t)(PADDR(rxd_bufs+next_idx));
+    rxd_arr[next_idx].status = 0;
+    rxd_arr[next_idx].special = 0;
+
+    *(uint32_t *)(E1000_addr+E1000_RDT) = next_idx;
+    next_idx = (next_idx+1)%E1000_RXDARR_LEN;
+    return 0;
+}
+
+void
+clear_e1000_interrupt(void)
+{
+    *(uint32_t *)(E1000_addr+E1000_ICR) |= E1000_RXT0;
+	lapic_eoi();
+	irq_eoi();
+}
+
+void
+e1000_trap_handler(void)
+{
+	struct Env* waiting = NULL;
+	int i;
+        
+    for (i = 0; i < NENV; i++) {
+        if (envs[i].e1000_waiting == true){
+            waiting = &envs[i];
+        }
+    }  
+        
+	if (!waiting) {
+		clear_e1000_interrupt();
+		return;
+	}
+    
+	else {
+		waiting->env_status = ENV_RUNNABLE;
+		waiting->e1000_waiting = false;
+		clear_e1000_interrupt();
+        env_run(waiting);
+		return;
+	}
+}
+
+int OSE_attach_E1000(struct pci_func *pcif)
+{
+    int i = 0; //general purpose to iterate
+    
+    pci_func_enable(pcif);
+    E1000_addr = mmio_map_region(pcif->reg_base[0],pcif->reg_size[0]);
+
+    tx_init(); 
+    rx_init();
+    e1000_irq = pcif->irq_line;
+    *(uint32_t *)(E1000_addr+E1000_IMS)  |= E1000_RXT0;
+    
+    *(uint32_t *)(E1000_addr+E1000_IMS)  |= (E1000_IMS_RXSEQ | E1000_IMS_RXO | E1000_IMS_RXT0|E1000_IMS_TXQE);
+    
+    //---------------------------------------challenge number 2!!-------------------------------------//
+    //set the ICS register to enable crc calculation
+    *(uint32_t *)(E1000_addr+E1000_ICS)  |= (E1000_ICS_RXSEQ );
+    //---------------------------------------challenge number 2!!-------------------------------------//
+    
+    *(uint32_t *)(E1000_addr+E1000_RCTL) &= E1000_RCTL_LBM_NO;
+
+    irq_setmask_8259A(irq_mask_8259A & ~(1 << e1000_irq));
+    return 0;
+}
+
+//---------------------------------------challenge number 1!!-------------------------------------//
+
+uint16_t read_mac_from_eeprom(uint32_t addr)
+{
+    volatile uint32_t *eerd = (uint32_t *)(E1000_addr+E1000_EERD);
+    volatile uint16_t data = 0;
+    *eerd = E1000_EERD_START | addr;
+    while ((*eerd & E1000_EERD_START) == 1); // Continually poll until we have a response
+
+    data = *eerd >> 16;
+    return data;
+}
+
+uint64_t get_mac()
+{
+    if (macaddr > 0)
+        return macaddr;
+
+    uint64_t word0 = read_mac_from_eeprom(E1000_EERD_MAC_WD0);
+    uint64_t word1 = read_mac_from_eeprom(E1000_EERD_MAC_WD1);
+    uint64_t word2 = read_mac_from_eeprom(E1000_EERD_MAC_WD2);
+    uint64_t word3 = (uint64_t)0x8000;
+    macaddr = word3<<48 | word2<<32 | word1<<16 | word0;
+    return macaddr;
+}
+
+void
+print_mac()
+{
+	cprintf("MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", mac_addr[0] & 0x00FF, mac_addr[0] >> 8, mac_addr[1] & 0x00FF, mac_addr[1] >> 8, mac_addr[2] & 0xFF, mac_addr[2] >> 8);
+}

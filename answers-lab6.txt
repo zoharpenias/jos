@@ -1,0 +1,78 @@
+1) How did you structure your transmit implementation? In particular, what do you do if the transmit ring is full?
+ 
+first we check if our tx ring(which we iniitalize in the pci attach function) is not full.
+if the ring is not full we checked that the packet does not Exceeds its max size.
+after this we copied the data into the relevant place which is pointed from the descriptor in the tx ring.
+the last thing was to move forward the tail of the tx ring.
+
+if the ring is full:
+The TX function returns negative number(-1) if the TX ring is full. 
+If the sys_send_packet syscall returns -E_TX_FULL, the packet is dropped. The syscall will then attempt to transmit the packet 20 times 
+before giving up. 
+we think 20 tries to send the packets is enuogh, so the packet will not spin forever.
+
+
+2) How did you structure your receive implementation? In particular, what do you do if the receive queue is empty and a user environment requests the next incoming packet?
+
+first we check if our rx ring(which we iniitalize in the pci attach function).
+if so, we copied the data into the relevant rx descriptor.
+we enabled the Receiver Timer Interrupt (RTI) to support the case which the rx ring is empty.
+
+if the ring is empty:
+we set the environment state to be "ENV_NOT_RUNNABLE".
+set a new varibale in the env struct("e1000_waiting") to be true, and gave up on the cpu.
+when an interrupt arrived we checked that there is an environment waiting for packet.
+if there is one, we changed its state to be "RUNNABLE", clear the "e100_waiting" flag, cleared the interrupt and let this environment to run.
+
+3) What does the web page served by JOS's web server say?
+
+it have a head line written : "This file came from JOS",
+and a sliding banner that says "Cheesy web page!"
+
+4) How long approximately did it take you to do this lab?
+we worked for one week, every day, approximately 5 hours per day.
+in the weekend(friday+ sautrday) we worked 8 hours per day
+
+about the challenges:
+
+challenge 1:
+we implemented dynamic MAC, read from the EEPROM as specified in sections 5.3.1, 5.6, and 13.4.4. 
+The EEPROM read register needs to be zeroed in between reads to flush the read data. 
+
+we modified the following files:
+-inc/{lib,syscall}.h - syscall declarations for getting MAC address
+-kern/e1000.c - call sys_get_mac at initialization(first line in rx init)
+-kern/syscall.c - sys_get_mac syscall to get MAC address
+-lib/syscall.c - userland syscall
+-net/lwip/jos/jif/jif.c - replace hardcoded address with MAC address from syscall
+
+challenge 2:
+We implemented zero copy
+//---------------output---------------//
+-kern/e1000.c - change transmit function to put the physical address in the relevant descriptor, instead of copying the data drom a virtual address.
+-kern/syscall.c - change sys_send_packet to send the physical address to "transmit"
+-kern/pmap(.h,.c) - add the function "user_mem_phy_addr" to get the physical address to a certain user space address.
+
+//---------------input---------------//
+-kern/e1000.c -  re-map the virtual page supplied to the physical page of the given packet
+explanation:
+the driver allocated physical pages for the NIC to use.
+When the user ask for a recieved buffer, he gives virtual address of the target page.
+the change we made is to map the physical page to that address and allocates a new page to
+the NIC.
+
+-kern/pmap(.h,.c) - add the function "user_mem_phy_addr" to get the physical address to a certain user space address.
+
+challenge 3:
+OUR CHALLENGE :)
+
+we implemnted a trust based packets communication.
+we classified every source node if is reliable or now, by trust value.
+the trsut value is being calculated by the number of bad packets that this node sent to us.
+if this node reached a trashold we don't agree to receive anymore packets from it.
+
+we modified the following files:
+-inc/{lib,syscall}.h - syscall declarations for checking the relevant bit that says if the packet is bad.
+-kern/syscall.c      - sys_check_rxseq to do the actual check of the bit(called E1000_ICR_RXSEQ). 
+-lib/syscall.c       - userland syscall
+-net/input           - create and maintaince mac addresses array. and check if the sender mac address is trusted or not.
